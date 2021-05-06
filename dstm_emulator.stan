@@ -1,12 +1,24 @@
+functions {
+  real matrix_noraml(int LHtype, real t1, real t2, real t3, 
+                             real lam1, real lam2, real lam3) {
+    return LHtype == 1 ? 
+      (lam1 + lam2) * t1 + log(lam1) + lam3 * t2 + log(lam3) :
+      lam3 * t1 + log(lam3);
+  }
+}
+
 data {
   int T; // length of time series
   int num_series; // number of time series simulations
-  matrix[num_series,T] y; // input matrix of time series
+  int S; // number of spatial locations
+  matrix[num_series, S, T] y; // input tensor of time series
   int p; // dimension of calibration parameters
   matrix[num_series, p] theta; // simulated parameter locations
   row_vector[p] theta_pred; // predict curve at these parameter values
-  int lags; //lag for AR(lags) model
   vector[lags] inits; // initial values for prediction
+}
+transformed data{
+  int lags=1; //for simplicity, assume AR(1)
 }
 
 transformed data{
