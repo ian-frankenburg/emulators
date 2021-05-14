@@ -69,7 +69,7 @@ transformed parameters{
 model {
   delta ~ beta(1,1);
   c_init ~ std_normal();
-  m_init ~ normal(y[1],.1);
+  m_init ~ normal(0,5);
   target += sum(ll);
 }
 generated quantities{
