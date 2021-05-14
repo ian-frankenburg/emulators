@@ -18,8 +18,10 @@ matplot(y,type="l")
 # int q; // number of time series
 # int p; //  lag order if AR dynamic regression matrix
 # vector[q] y[N];
-model_dat = list("y"=matrix(y,ncol=1),"p"=1,q=1,N=length(y))
-compiled = cmdstan_model(stan_file="dlm_kalman.stan")
+y=cbind(df$y.1)
+matplot(y,type="l")
+model_dat = list("y"=matrix(y,ncol=ncol(y)),"p"=1,q=1,N=length(y))
+compiled = cmdstan_model(stan_file="kalman_filter.stan")
 sample <- compiled$sample(
   data = model_dat,
   chains = 2,
@@ -28,6 +30,8 @@ sample <- compiled$sample(
   max_treedepth = 10
 )
 
-ypred=matrix(sample$summary("ypred")$mean,ncol=1)
-matplot(ypred,type="l",lwd = 2,lty=1,col="darkblue")
-matplot(y,type="l",col="darkred",add=T)
+ypred=matrix(sample$summary("ypred"))
+matplot(ypred$mean,type="l",lwd = 2,lty=1,col="darkred")
+matplot(ypred$q5,type="l",col="darkblue",add=T,lwd=2)
+matplot(ypred$q95,type="l",col="darkred",add=T,lwd=2)
+matplot(y[,2],type="l",col="darkblue",add=T,lwd=2)
