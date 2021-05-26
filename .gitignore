@@ -4,3 +4,4 @@ build/
 *.hpp
 *.csv
 .ipynb_checkpoints
+*.ipynb
