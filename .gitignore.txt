@@ -1,0 +1,6 @@
+ignore/
+build/
+*.exe
+*.hpp
+.ipynb_checkpoints
+*.ipynb
