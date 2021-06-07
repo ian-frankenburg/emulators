@@ -4,10 +4,8 @@ data {
   matrix[num_series,T] y; // input matrix of time series
   int p; // dimension of calibration parameters
   matrix[num_series, p] theta; // simulated parameter locations
-  row_vector[p] theta_pred; // predict curve at these parameter values
   int lags; //lag for AR(lags) model
   row_vector[T] z;
-  vector[lags] inits; // initial values for prediction
 }
 
 transformed data{
@@ -56,7 +54,8 @@ model {
   }
   tau ~ std_normal();
   rho ~ beta(1,.3);
-  calibrate ~ uniform(0,1);
+  calibrate[1] ~ uniform(0,.5);
+  calibrate[2] ~ uniform(.5,1);
   sig_z ~ gamma(1,1);
   for (n in 2:T){
     y[,n] ~ multi_normal(to_matrix(F[,,n-lags])*phi[n,], sqrt(sigma[n])*C);

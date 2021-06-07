@@ -3,13 +3,13 @@ model_data = list('T'=length(scaley),num_series=sims,
                   y=t(matrix(y_design,ncol=sims,nrow=length(scaley))),p=2,z=c(scaley),
                   theta=theta_design,num_pred=1,
                   theta_pred=c(1,1),lags=1,inits=as.array(ytest[1:1]))
-file <- file.path("dlm_calibrator.stan") 
+file <- file.path("dlm_GaSP.stan") 
 model <- cmdstan_model(file)
 mcmc <- model$sample(data = model_data,
                      max_treedepth = 10,adapt_delta = .8,
                      chains = 4,
-                     iter_warmup = 1000,
-                     iter_sampling =1000,
+                     iter_warmup = 500,
+                     iter_sampling = 500,
                      refresh = 25, parallel_chains = getOption("mc.cores", 4))
 hist(mcmc$draws("calibrate[1]"),breaks=100)
 hist(mcmc$draws("calibrate[2]"),breaks=100)

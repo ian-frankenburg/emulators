@@ -1,0 +1,327 @@
+---
+title: "GaSP vs. DLM-GaSP for Emulating Temporal Simulators"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(lhs)
+library(geostats)
+library(deSolve)
+library(cmdstanr)
+library(rstan)
+library(truncnorm)
+sir <- function(t, y, params) {
+  with(as.list(c(params, y)), {
+    S = y[1]
+    I = y[2]
+    dS = -beta*S*I/N
+    dI = beta*S*I/N-gamma*I
+    list(c(dS,dI))
+  })
+}
+```
+
+In this markdown file, I compare the standard GaSP methodology with a dynamic GaSP for emulating a simulation with time series output, afterwhich calibration is performed using noisy field observations. The standard GaSP framework form emulating time series essentially amounts to Gaussian process regression or Kriging, where the time along with the calibration parameters are treated as input data. Unfortunately, this methodology (as currently implementerd in Stan) quickly becomes infeasible for even moderately-sized time series. I will demonstrate in the following sections after explanding on the background methodology. 
+
+# GaSP Background
+In this section, we review the Gaussian stochastic process (GaSP) emulation methodology to motivate the dynamic model extension in the following section. The literature on GaSP methodology can be broken down into the nonexclusive categories (Higdon et al. 2004):
+
+- experimental design - determining the input settings in which to carry out the expensive computer simulation training runs
+- emulation - construct a statistical model for the expensive computer simulator which behaves similarly, enabling new computer inputs to be used
+- calibration - using a combination of field observations and training runs, estimate the unknown computer inputs that map to the real-world data or physical system
+
+In the following sub-sections, we focus on emulation and calibration, though experimental design is certainly important, we found a naive space-filling design adequate for our simulation purposes.
+
+## Emulation
+Let a computer model $\eta$ be a function of $d$-dimensional inputs $\mathbf z=(z_1,\ldots,z_d)^\top$ and generate a scalar output $y(\mathbf{z})$. The purpose of GASP methodology is to learn how $\eta$ behaves for unknown input values $\mathbf{z}^\star$ based on a limited number $m$ training runs, denoted $\{\mathbf{z}_1,\ldots,\mathbf z_m\}$. The GASP methodology then places a Gaussian process prior on the unknown functional form of $\eta$ so that
+$$
+y(\cdot) \sim \mathcal{GP}(\mu(\cdot),\sigma^2 c(\cdot,\cdot)),
+$$
+where $\mu,$ $\sigma^2$, and $c(\cdot,\cdot)$ are the mean, variance, and correlation function, respectively. Often the correlation function is assumed to follow a standard parametric form like the squared exponential correlation function
+$$
+c(\mathbf{z},\mathbf{z}')=\exp\big(-\sum_{i=1}^d \beta_i(\mathbf{z}_i-\mathbf{z}_i')^2\big),
+$$
+for any two inputs $\mathbf z$ and $\mathbf z'.$
+
+As before, given $m$ training runs and assuming the GASP emulation framework, then
+$$
+\mathbf{y}_{1:m}:=(y(\mathbf{z}_1),\ldots,y(\mathbf z_m))^\top
+$$
+is distributed multivariate Gaussian. Therefore, for unknown input point $\mathbf{z}^\star$, the predictive distribution can be formed through considering the joint distribution $(\mathbf{y}_{1:m},y(\mathbf{z}^\star))$
+. This joint distribution will be multivariate Gaussian, so applying the standard conditioning identities gives the posterior predictive distribution of $p(y(\mathbf{z}^\star)|\mathbf{y}_{1:m})\sim N(\tilde \mu(\mathbf{z}^\star),\tilde v(\mathbf{z}^\star)),$ with
+$$
+\begin{aligned}
+\tilde\mu(\mathbf{z}^\star)&=\boldsymbol\mu+\boldsymbol{\gamma}^\top\boldsymbol\Gamma^{-1}(\mathbf{y}_{1:m}-\boldsymbol\mu) \\
+\tilde v(\mathbf{z}^\star)&=\sigma^2(1-\boldsymbol{\gamma}^\top\boldsymbol{\Gamma}^{-1}\boldsymbol{\gamma}),
+\end{aligned}
+$$
+where $\boldsymbol{\gamma}=(c(\mathbf{z}^\star,\mathbf{z}_1),\ldots,c(\mathbf{z}^\star,\mathbf{z}_m))^\top$ and $\boldsymbol{\Gamma}_{ij}=c(\mathbf{z}_i,\mathbf{z}_j)$ for $i,j=1,\ldots,m.$ Conceptually, this framework is immediately applicable to emulating computer simulations that output time series, in that $t$ can just be included in the input $\mathbf z$. However, this would massively increase the computational demand of the GP prior, as GP regression is of order $\mathcal{O}(n^3)$, where $n$ is the dimension of input to the GP.
+
+## Calibration
+In this sub-section, we follow the approach of (Higdon et al., 2004) in the presentation of the calibration methodology. The calibration framework presented in this work augments the field observations with the simulation runs and constructs the hierarchical model thereafter. To be explicit with the model formulation, let the field observations be denoted $\mathbf y^*$ at some unknown calibration parameters $\mathbf z^*$. Like in the above section, let $\mathbf y$ be the simulation runs at $m$ design points $\{\mathbf z_1,\ldots,\mathbf z_m\}$. Now define $\mathbf y_c := (\mathbf y^*, \mathbf y)^\top$. The likelihood then becomes 
+$$
+\mathcal L(\mathbf y_c|\mathbf z,\mathbf z^*,\mu,\boldsymbol\beta)\propto |\boldsymbol\Sigma|^{-1/2}\exp\Big(-\frac{1}{2}(\mathbf y_c - \mu\boldsymbol 1)^\top\boldsymbol \Sigma^{-1}(\mathbf y_c - \mu\boldsymbol 1)\Big)
+$$
+where
+$$
+\boldsymbol\Sigma = \boldsymbol\Sigma_{\mathbf y}+\begin{pmatrix}\boldsymbol\Sigma_{\mathbf y^*} & 0 \\ 0 & 0\end{pmatrix}
+$$
+The posterior then takes the form 
+$$
+p(\mathbf z^*,\mu,\beta,|\mathbf y_c)\propto \mathcal L(\mathbf y_c|\mathbf z^*,\mu,\boldsymbol\beta)p(\beta)p(\mathbf z^*)p(\mu)
+$$
+
+# DLM-GaSP Background
+In this section, we review the framework developed by {LiuWest2009} and applied by {Farah2014} to emulate and calibrate an expensive epidemic model of A/H1N1 influenza. To alleviate the computational demands of the previous section, a dynamic linear model is introduced to capture the temporal structure, while the GP kernel captures the relation among input parameters. Define the following necessary ingredients to build the DLM-GASP methodology:
+
+ - $m$ training data points $\mathbf{z}_{1:m}=\{\mathbf{z}_1,\ldots,\mathbf{z}_m\}$, where each $\mathbf z_i\in\mathbb R^d$
+ - a multivariate time series where at each time slice $t$, the outcome is a vector $\mathbf{y}_t(\mathbf{z}_{1:m})=(\mathbf{y}_t(\mathbf{z}_1),\ldots,\mathbf{y}_t(\mathbf{z}_m))^\top$.
+ 
+The DLM-GASP framework now uses a flexible time-varying stochastic structure (TVAR) to capture potentially non-stationary and intricate computer simulation outputs that vary over time. For each time series generated from a design point $\mathbf{z}_i$, the univariate TVAR model is
+$$
+\mathbf{y}_t(\mathbf{z}_i)=\sum_{j=1}^p\boldsymbol{\phi}_{t,j} y_{t-j}(\mathbf{z}_i)+{\varepsilon}_t,
+$$
+where the autoregressive parameters $(\boldsymbol{\phi}_1,\ldots,\boldsymbol\phi_p)$ are allowed to vary over time and $\varepsilon_t\sim\mathcal{N}(0,v_t)$. The multiple time series are then linked through a GASP model with covariance function
+$$
+  \text{Cov}(\mathbf{z},\mathbf{z}')=v_tc(\mathbf{z},\mathbf{z}').
+$$
+The multivariate TVAR model may then be written compactly as
+$$
+\mathbf y_t(\mathbf{z}_{1:m}) = \mathbf F_t^\top \boldsymbol\phi_t+\boldsymbol\varepsilon_t,
+$$
+where
+$$
+\begin{aligned}
+\mathbf F^\top_{t}&=\begin{pmatrix}y_{t-1}(\mathbf{z}_1) & \cdots &y_{t-p}(\mathbf{z}_1)\\ \vdots & \ddots & \vdots \\
+y_{t-1}(\mathbf{z}_m) & \cdots &y_{t-p}(\mathbf{z}_m)
+\end{pmatrix},
+\end{aligned}
+$$
+$\boldsymbol\varepsilon_t\sim N(0,v_t\boldsymbol\Sigma)$ and $\boldsymbol\Sigma$ is the $m\times m$ correlation matrix formed from the GP kernel function. The hidden state of the system is allowed to follow a random walk in that
+$$
+\boldsymbol{\phi}_t=\boldsymbol{\phi}_{t-1}+\boldsymbol{w}_t, \quad \boldsymbol{w}_t\sim \mathcal{N}(0,\mathbf{W}_t).
+$$
+
+The resulting posterior predictive inference necessary for emulation at an unknown input point $\mathbf{z}^\star$ is then found through standard multivariate Gaussian conditioning arguments to be normal with first two moments specified as
+$$
+\begin{split}
+        \mu(\mathbf{z}^\star)&=\sum_{j=1}^p\phi_{t,j}\mathbf{y}_{t-j}(\mathbf{z}^\star)+\frac{1}{v_t}\boldsymbol{\gamma}_{\mathbf{z}^\star}^\top\boldsymbol\Sigma^{-1}\boldsymbol{\varepsilon}_t\\
+        \sigma^2(\mathbf{z}^\star)&= v_t(1-\boldsymbol{\gamma}_{\mathbf{z}^\star}^\top \boldsymbol\Sigma^{-1}\boldsymbol{\gamma}_{\mathbf{z}^\star}),
+    \end{split}
+$$
+with $\boldsymbol{\gamma}_{\mathbf{z}^\star}=(c(\mathbf{z}^\star,\mathbf{z}_1),\ldots,c(\mathbf{z}^\star,\mathbf{z}_m))^\top$ and $\boldsymbol{\varepsilon}_t=(\varepsilon(\mathbf{z}_1),\ldots,\varepsilon(\mathbf{z}_m))^\top$. With these moments established, it is seen that the DLM-GASP emulator interpolates the training data, while the uncertainty associated with new input values is quantified through the Gaussian posterior predictive distribution.
+
+# Experiments: GaSP versus DLM-GaSP
+For the following experiments, we consider two scenarios to compare the standard GaSP formulation with the DLM-GaSP. The first scenario considers 8 training runsm which is reasonably small. It is shown that the GaSP model 
+
+## Small Number of Training Runs
+```{r fieldAndTrain, include=F, cache=T, echo=F}
+N=1000
+nobs = 20
+x = seq(1,nobs,length.out = nobs)
+simulation<- function(beta,gamma,x){
+  out = ode(c(N-1,1), x, sir, list(beta=beta,gamma=gamma, method="ode45"))[,3]
+  out
+}
+y = yraw= simulation(.7,.2,x)
+for(i in 1:length(y)){
+  #yraw[i]=(rnbinom(1,mu = y[i], size=100))+1
+  yraw[i]=(rpois(1,y[i]))
+}
+plot(x,(yraw),xlim=c(min(x),max(x)),pch=19)
+for(i in 1:length(y)){
+  y[i]=(yraw[i])
+}
+#x = seq(1,nobs,b=2)
+#y = y[x]
+
+sims=5
+nsims=sims*length(y)
+# x_design = sample(0:10,size = nsims,replace = T) # field observations
+# x_design = sample(0:10,size = nsims,replace = T) # field observations
+x_design = rep(x,sims)
+cube = randomLHS(sims,k = 2)
+theta_design = matrix(0,nrow=sims,ncol=2)
+theta_design[,1] <- seq(0.05,.5, length.out = sims)
+theta_design[,2] <- seq(.5, 1, length.out = sims)
+theta_design[,1] = qunif(cube[,1],0,.5)
+theta_design[,2] = qunif(cube[,2],.5,1)
+y_design=rep(0,sims*length(y))
+k=1
+for(i in 1:nrow(theta_design)){
+  y_design[(1+(k-1)*length(x)):(k*length(x))] = (sqrt(simulation(theta_design[i,2],theta_design[i,1],seq(1,nobs,length.out = nobs))))
+  k=k+1
+}
+scaley = (sqrt(y))
+c_design = matrix(0,nrow=2,ncol=length(y)*sims)
+k=1
+for(i in 1:nrow(theta_design)){
+  c_design[,(1+(k-1)*length(x)):(k*length(x))] = theta_design[i,]
+  k=k+1
+}
+```
+
+```{r plotRuns, cache=T, echo=F}
+plot(x,scaley, col = rgb(1, 184/255, 28/255, 0, alpha = 0.7),
+     pch = 16, cex = 2.5, ylim=c(0,max(y_design)))
+k=1
+lines(y_design[(1+(k-1)*length(x)):(k*length(x))],lwd=5, col = rgb(39/255, 116/255, 174/255, alpha = 0.7))
+for(k in 2:nrow(theta_design)){
+  lines(y_design[(1+(k-1)*length(x)):(k*length(x))],lwd=5, col = rgb(39/255, 116/255, 174/255, alpha = 0.7))
+}
+points(x,scaley, pch=19,cex=2,ylim=c(0,max(y_design)))
+legend(1, 15, legend=c("Field Data","Simulation Runs"),
+       col=c("black", rgb(39/255, 116/255, 174/255),rgb(.698, .133, .133)), lty=1, cex=0.8,seg.len=1,lwd=8)
+```
+
+```{r GaSP Stan,cache=T,include=F}
+model_data = list(nobs=length(y),
+                  nsims=sims,init=1,
+                  p=1,
+                  q=2,
+                  x_obs=matrix(x,ncol=length(x)),
+                  y_obs=c(scaley),
+                  x_sims=matrix(x_design,ncol=length(x)*sims),
+                  t_sims=(matrix(c_design,ncol=sims*length(y),nrow=2)),
+                  y_sims=(y_design))
+file <- file.path("GaSP.stan")
+model <- cmdstan_model(file)
+start_time1 <- Sys.time()
+mcmc <- model$sample(data = model_data,
+                     max_treedepth = 10,adapt_delta = .8,
+                     chains = 4,
+                     iter_warmup = 1000,
+                     iter_sampling = 1000,
+                     refresh = 2, parallel_chains = getOption("mc.cores", 4))
+end_time1 <- Sys.time()
+```
+
+```{r dlmGaSP Stan, cache=T, eval=T,include=F}
+model_data = list('T'=length(scaley),num_series=sims,
+                  y=t(matrix(y_design,ncol=sims,nrow=length(scaley))),p=2,z=c(scaley),
+                  theta=theta_design,num_pred=1,
+                  theta_pred=c(1,1),lags=1,inits=1)
+file <- file.path("dlm_GaSP.stan") 
+
+model <- cmdstan_model(file)
+start_time2 <- Sys.time()
+mcmc2 <- model$sample(data = model_data,
+                     max_treedepth = 10,adapt_delta = .8,
+                     chains = 4,
+                     iter_warmup = 1000,
+                     iter_sampling = 1000,
+                     refresh = 25, parallel_chains = getOption("mc.cores", 4))
+end_time2 <- Sys.time()
+```
+
+```{r postDraws, cache=T, echo=F,fig.show="hold", out.width="50%"}
+par(2, 2)
+hist(mcmc$draws("theta[1]"), breaks=100, main="GaSP")
+abline(v=.2,lwd=3,col="darkred")
+hist(mcmc$draws("theta[2]"), breaks=100, main="GaSP")
+abline(v=.7,lwd=3,col="darkred")
+hist(mcmc2$draws("calibrate[1]"),breaks=100, main="DLM-GaSP")
+abline(v=.2,lwd=3,col="darkred")
+hist(mcmc2$draws("calibrate[2]"),breaks=100, main="DLM-GaSP")
+abline(v=.7,lwd=3,col="darkred")
+```
+
+## Moderate-Large Number of Training Runs
+```{r fieldAndTrain2, include=F, cache=T, echo=F}
+N=1000
+nobs = 45
+x = seq(1,nobs,length.out = nobs)
+simulation<- function(beta,gamma,x){
+  out = ode(c(N-1,1), x, sir, list(beta=beta,gamma=gamma, method="ode45"))[,3]
+  out
+}
+y = yraw= simulation(.7,.2,x)
+for(i in 1:length(y)){
+  #yraw[i]=(rnbinom(1,mu = y[i], size=100))+1
+  yraw[i]=(rpois(1,y[i]))
+}
+plot(x,(yraw),xlim=c(min(x),max(x)),pch=19)
+for(i in 1:length(y)){
+  y[i]=(yraw[i])
+}
+#x = seq(1,nobs,b=2)
+#y = y[x]
+
+sims=20
+nsims=sims*length(y)
+# x_design = sample(0:10,size = nsims,replace = T) # field observations
+# x_design = sample(0:10,size = nsims,replace = T) # field observations
+x_design = rep(x,sims)
+cube = randomLHS(sims,k = 2)
+theta_design = matrix(0,nrow=sims,ncol=2)
+theta_design[,1] = qunif(cube[,1],0,.5)
+theta_design[,2] = qunif(cube[,2],.5,1)
+y_design=rep(0,sims*length(y))
+k=1
+for(i in 1:nrow(theta_design)){
+  y_design[(1+(k-1)*length(x)):(k*length(x))] = (sqrt(simulation(theta_design[i,2],theta_design[i,1],seq(1,nobs,length.out = nobs))))
+  k=k+1
+}
+scaley = (sqrt(y))
+#x=(x-min(x))/(max(x)-min(x))
+#plot(x,scaley,type="l",col=rgb(0, 0, 0, alpha = 1),lwd=6,lty=1,ylim=c(min(y_design),max(y_design)),xlab="Days",ylab="Case Counts",main="Emulation & Calibration Simulation")
+#points(x,(simulation(.626,.2,1:nobs)),type="l",col=rgb(.698, .133, .133, alpha = .9),lwd=6)
+#x_design=(x_design-min(x_design))/(max(x_design)-min(x_design))
+# points(x_design,y_design, col = rgb(39/255, 116/255, 174/255, alpha = 0.7),
+#        pch = 16, cex = 2)
+c_design = matrix(0,nrow=2,ncol=length(y)*sims)
+k=1
+for(i in 1:nrow(theta_design)){
+  c_design[,(1+(k-1)*length(x)):(k*length(x))] = theta_design[i,]
+  k=k+1
+}
+```
+
+```{r plotRuns2, cache=T, echo=F}
+plot(x,scaley, col = rgb(1, 184/255, 28/255, 0, alpha = 0.7),
+     pch = 16, cex = 2.5, ylim=c(0,max(y_design)))
+k=1
+lines(y_design[(1+(k-1)*length(x)):(k*length(x))],lwd=5, col = rgb(39/255, 116/255, 174/255, alpha = 0.7))
+for(k in 2:nrow(theta_design)){
+  lines(y_design[(1+(k-1)*length(x)):(k*length(x))],lwd=5, col = rgb(39/255, 116/255, 174/255, alpha = 0.7))
+}
+points(x,scaley, pch=19,cex=2,ylim=c(0,max(y_design)))
+legend(1, 15, legend=c("Field Data","Simulation Runs"),
+       col=c("black", rgb(39/255, 116/255, 174/255),rgb(.698, .133, .133)), lty=1, cex=0.8,seg.len=1,lwd=8)
+```
+
+```{r dlmGaSP Stan2, cache=T, eval=T,include=F}
+model_data = list('T'=length(scaley),num_series=sims,
+                  y=t(matrix(y_design,ncol=sims,nrow=length(scaley))),p=2,z=c(scaley),
+                  theta=theta_design,num_pred=1,
+                  theta_pred=c(1,1),lags=1,inits=1)
+file <- file.path("dlm_GaSP.stan") 
+model <- cmdstan_model(file)
+start_time3 <- Sys.time()
+mcmc3 <- model$sample(data = model_data,
+                     max_treedepth = 10,adapt_delta = .8,
+                     chains = 4,
+                     iter_warmup = 1000,
+                     iter_sampling = 1000,
+                     refresh = 25, parallel_chains = getOption("mc.cores", 4))
+end_time3 <- Sys.time()
+```
+
+```{r postDraws2, cache=T, echo=F,fig.show="hold", out.width="50%"}
+par(1, 2)
+hist(mcmc3$draws("calibrate[1]"),breaks=100, main="DLM-GaSP")
+abline(v=.2,lwd=3,col="darkred")
+hist(mcmc3$draws("calibrate[2]"),breaks=100, main="DLM-GaSP")
+abline(v=.7,lwd=3,col="darkred")
+```
+
+```{r}
+end_time1-start_time1
+end_time2-start_time2
+end_time3-start_time3
+```
+
+# Future Ideas for Spatio-Temporal GaSP

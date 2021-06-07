@@ -32,7 +32,7 @@ for(i in 1:length(y)){
 #x = seq(1,nobs,b=2)
 #y = y[x]
 
-sims=10
+sims=7
 nsims=sims*length(y)
 # x_design = sample(0:10,size = nsims,replace = T) # field observations
 # x_design = sample(0:10,size = nsims,replace = T) # field observations
@@ -40,14 +40,14 @@ x_design = rep(x,sims)
 cube = randomLHS(sims,k = 2)
 theta_design = matrix(0,nrow=sims,ncol=2)
 theta_design[,1] = qunif(cube[,1],0,.5)
-theta_design[,2] = qunif(cube[,2],0.5,1)
+theta_design[,2] = qunif(cube[,2],.5,1)
 y_design=rep(0,sims*length(y))
 k=1
 for(i in 1:nrow(theta_design)){
   y_design[(1+(k-1)*length(x)):(k*length(x))] = (sqrt(simulation(theta_design[i,2],theta_design[i,1],seq(1,nobs,length.out = nobs))))
   k=k+1
 }
-scaley = sqrt(y)
+scaley = (sqrt(y))
 #x=(x-min(x))/(max(x)-min(x))
 #plot(x,scaley,type="l",col=rgb(0, 0, 0, alpha = 1),lwd=6,lty=1,ylim=c(min(y_design),max(y_design)),xlab="Days",ylab="Case Counts",main="Emulation & Calibration Simulation")
 #points(x,(simulation(.626,.2,1:nobs)),type="l",col=rgb(.698, .133, .133, alpha = .9),lwd=6)
@@ -79,7 +79,7 @@ model_data = list(nobs=length(y),
                   x_sims=matrix(x_design,ncol=length(x)*sims),
                   t_sims=(matrix(c_design,ncol=sims*length(y),nrow=2)),
                   y_sims=(y_design))
-file <- file.path("GaSPc.stan")
+file <- file.path("GaSP.stan")
 model <- cmdstan_model(file)
 mcmc <- model$sample(data = model_data,
                      max_treedepth = 10,adapt_delta = .8,
