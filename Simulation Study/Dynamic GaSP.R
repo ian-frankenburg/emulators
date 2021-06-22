@@ -1,3 +1,9 @@
+library(dlm)
+data()
+inv <- read.table("invest2.dat",
+                   col.names = c("Denmark", "Spain"))
+
+
 # run vanilla GaSP file first
 model_data = list('T'=length(scaley),num_series=sims,
                   y=t(matrix(y_design,ncol=sims,nrow=length(scaley))),p=2,z=c(scaley),

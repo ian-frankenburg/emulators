@@ -182,11 +182,11 @@ This will be essentially all I need to code up the likelihood necessary for join
 <!-- This is all I need to define the model hierarchically in Stan, calibrating the parameters without modularization -->
 
 # Experiments: GaSP versus DLM-GaSP
-For the following experiments, I consider two scenarios to compare the standard GaSP formulation with the DLM-GaSP. The first scenario considers 10 training runs of a differential equation computer simulation over a time horizon of 20 days. This is relatively small, but even so, this framework already took almost an hour in Stan for 1000 MCMC samples. To demonstrate the power of the DLM-GaSP, I generate instead 30 training runs instead of 10 but use the same 20 day time horizon. Notice that with even 3-times the number of input simulations, the DLM-GaSP is many orders of magnitude faster than the standard GaSP model for time series emulation-calibration. 
+For the following experiments, I consider a scenario to compare the standard GaSP formulation with the DLM-GaSP. This comparison considers 10 training runs of a differential equation computer simulation over a short time horizon of 20 days. I generate 2000 MCMC samples, with the first 1000 discarded as warm up. Priors on the calibration parameters are flat uniform(0,1). I've found that my vanilla GaSP Stan code becomes almost unusable for $T>0$ and more than 10 training runs, though the DLM-GaSP scales very well for long time series and many more training runs. This shows the applicability to spatio-temporal data. 
 
 ## Training Runs
 
-### 5 Training Runs for GaSP Model
+### Training Runs for GaSP Model
 ```{r fieldAndTrain, include=F, cache=T, echo=F}
 sir <- function(t, y, params) {
   with(as.list(c(params, y)), {
@@ -275,8 +275,6 @@ mcmc <- model$sample(data = model_data,
 end_time1 <- Sys.time()
 ```
 
-### 30 Training Runs for DLM-GaSP Model
-
 ```{r dlmGaSP Stan, cache=T, eval=T,include=F}
 model_data = list('T'=length(scaley),num_series=sims,
                   y=t(matrix(y_design,ncol=sims,nrow=length(scaley))),p=2,z=c(scaley),
@@ -311,7 +309,7 @@ abline(v=.75,lwd=3,col="darkred")#
 
 ```{r,eval=T,echo=F}
 paste("GaSP Run Time: ",round(end_time1-start_time1,2), "minutes")
-paste("DLM-GaSP Run Time: ",round(end_time2-start_time2,2), "minutes")
+paste("DLM-GaSP Run Time: ",round(end_time2-start_time2,2), "seconds")
 ```
 
 # Future Ideas for Spatio-Temporal GaSP
